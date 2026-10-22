@@ -1,18 +1,65 @@
-<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Venom OwnTracks setup</title>
-<style>body{font-family:-apple-system,sans-serif;max-width:520px;margin:24px auto;padding:0 16px}input{width:100%;font-size:16px;padding:10px;margin:6px 0 14px;box-sizing:border-box}a.btn,button{display:block;text-align:center;background:#1a73e8;color:#fff;padding:14px;border-radius:10px;text-decoration:none;font-size:17px;border:0;width:100%}small{color:#666}</style></head>
-<body><h2>Connect OwnTracks to Venom</h2>
-<p><small>Everything here stays on your phone. Nothing you paste is sent anywhere except into the OwnTracks app.</small></p>
-<label>Webhook URL<input id="u" placeholder="https://..."></label>
-<label>Authorization header value<input id="h" placeholder="Bearer ..."></label>
-<button onclick="go()">Make my OwnTracks link</button>
-<p id="out"></p>
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Venom OwnTracks setup</title>
+<meta name="referrer" content="no-referrer">
+<style>body{font-family:-apple-system,sans-serif;max-width:520px;margin:24px auto;padding:0 16px;line-height:1.4}button{display:block;width:100%;background:#1a73e8;color:#fff;padding:20px;border-radius:12px;border:0;font-size:20px;font-weight:600}button:disabled{background:#9bb8e8}.note{background:#fff8e1;border-radius:10px;padding:12px;margin:16px 0}.err{color:#b00020;font-weight:600}.ok{color:#1b7f3b;font-weight:600}small{color:#666}</style>
 <script>
-function go(){
- var u=document.getElementById('u').value.trim(), h=document.getElementById('h').value.trim();
- if(!u||!h){alert('Paste both values first');return}
- if(/^authorization\s*:/i.test(h)) h=h.replace(/^authorization\s*:\s*/i,'');
- var cfg={"_type":"configuration","mode":3,"url":u,"httpHeaders":"Authorization: "+h,"auth":false,"monitoring":1,"tid":"BO","adapt":10,"locatorInterval":60,"locatorDisplacement":50,"ranging":false,"cmd":false};
- var link='owntracks:///config?inline='+encodeURIComponent(btoa(JSON.stringify(cfg)));
- document.getElementById('out').innerHTML='<a class="btn" href="'+link+'">Open in OwnTracks</a><p><small>OwnTracks will show the new settings. Tap to accept them.</small></p>';
+// libsodium.js browser build: calls window.sodium.onload once ready
+var SODIUM=null; window.sodium={onload:function(s){SODIUM=s;if(window.onSodium)window.onSodium()}};
+</script>
+<script src="https://cdn.jsdelivr.net/gh/jedisct1/libsodium.js@0.7.15/dist/browsers/sodium.js" integrity="sha384-80nH8cbwibyXVHJqGj+El9K3V5iRV491XuUvgqa2Y7KhNHFh2Lr/3IMa+NHD8661" crossorigin="anonymous" async></script>
+</head>
+<body><h2>Connect OwnTracks to Venom</h2>
+<div class="note"><b>First:</b> in OwnTracks, open Settings (the <b>i</b> at top left) &gt; <b>Remote Control</b> and turn on <b>Allow external configuration</b>. Then come back here.</div>
+<button id="go" onclick="go()" disabled>Loading…</button>
+<p id="out"></p>
+<p><small>Your phone makes a private channel name and an encryption key, seals them so only the Venom box can open them, and gives the same settings to OwnTracks. Your locations are end-to-end encrypted. The relay (ntfy.sh) and this site can't read them.</small></p>
+<script>
+var NTFY='https://ntfy.sh', out=document.getElementById('out'), btn=document.getElementById('go');
+function show(msg,cls){out.className=cls||'';out.textContent=msg}
+function b64urlDecode(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';var b=atob(s),a=new Uint8Array(b.length);for(var i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return a}
+function b64(bytes,url){var s='';for(var i=0;i<bytes.length;i++)s+=String.fromCharCode(bytes[i]);s=btoa(s);return url?s.replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''):s}
+function randAlnum(n){var cs='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',o='',b=new Uint8Array(1);
+  while(o.length<n){crypto.getRandomValues(b);if(b[0]<248)o+=cs[b[0]%62]}return o} // 248 = 4*62: unbiased
+var q=new URLSearchParams(location.search), PK=null, E=q.get('e')||'';
+try{var pkb=b64urlDecode(q.get('pk')||'');if(pkb.length===32)PK=pkb}catch(e){}
+var bad=!PK?'missing or invalid box key (pk)':(!/^[A-Za-z0-9_-]{8,64}$/.test(E)?'missing or invalid enrollment channel (e)':null);
+function ready(){if(bad){show('This setup link is broken: '+bad+'. Ask for a fresh link.','err');btn.textContent='Connect OwnTracks';return}
+  btn.disabled=false;btn.textContent='Connect OwnTracks'}
+window.onSodium=ready; if(SODIUM)ready();
+setTimeout(function(){if(!SODIUM&&!bad)show('Could not load the encryption library. Check your connection and reload.','err')},15000);
+function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
+async function waitAck(h,sinceId){
+  var end=Date.now()+30000;
+  while(Date.now()<end){
+    await sleep(2500);
+    try{var r=await fetch(NTFY+'/'+E+'/json?poll=1&since='+encodeURIComponent(sinceId),{cache:'no-store'});
+      var lines=(await r.text()).split('\n');
+      for(var i=0;i<lines.length;i++){if(!lines[i])continue;var m=JSON.parse(lines[i]);
+        if(m.event==='message'&&typeof m.message==='string'&&m.message.indexOf('ack:'+h+':')===0)return m.message.slice(h.length+5)}
+    }catch(e){}
+  }
+  return null;
+}
+async function go(){
+  if(bad||!SODIUM)return; btn.disabled=true; show('Securing and sending to the Venom box…');
+  var topic='vn-'+b64(crypto.getRandomValues(new Uint8Array(24)),true); // 32 random base64url chars
+  var key=randAlnum(32); // OwnTracks copies the UTF-8 passphrase into the 32-byte secretbox key
+  var sealed=SODIUM.crypto_box_seal(new TextEncoder().encode(JSON.stringify({v:1,topic:topic,key:key})),PK);
+  var body=b64(sealed,false), res, pub={};
+  try{res=await fetch(NTFY+'/'+E,{method:'POST',body:body,cache:'no-store'});try{pub=await res.json()}catch(e){}}
+  catch(e){btn.disabled=false;return show('Could not reach ntfy.sh. Check your connection and try again.','err')}
+  if(!res.ok){btn.disabled=false;return show(res.status===429?'ntfy.sh says too many requests. Wait a minute and try again.':('Sending failed (HTTP '+res.status+').'),'err')}
+  show('Sent. Waiting for the Venom box to confirm…');
+  var digest=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(body)));
+  var h=Array.from(digest.slice(0,8)).map(function(x){return x.toString(16).padStart(2,'0')}).join('');
+  var st=await waitAck(h,pub.id||'30s');
+  if(st!=='ok'){btn.disabled=false;key=null;
+    var m={window_closed:'The enrollment window is closed. Ask for it to be opened, then tap again.',
+           already_enrolled:'A phone is already connected. The old key must be reset on the box before connecting again.'}[st];
+    return show(m||'The Venom box did not confirm (it may be offline). Nothing was changed in OwnTracks. Try again later.','err');}
+  var cfg={"_type":"configuration","mode":3,"url":NTFY+"/"+topic,"encryptionKey":key,"auth":false,
+           "monitoring":1,"tid":"BO","adapt":10,"locatorInterval":60,"locatorDisplacement":50,"ranging":false,"cmd":false};
+  var link='owntracks:///config?inline='+encodeURIComponent(btoa(JSON.stringify(cfg)));
+  key=null; show('Connected. Opening OwnTracks… tap to accept the new settings.','ok');
+  location.href=link;
 }
 </script></body></html>
