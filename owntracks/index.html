@@ -1,0 +1,18 @@
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Venom OwnTracks setup</title>
+<style>body{font-family:-apple-system,sans-serif;max-width:520px;margin:24px auto;padding:0 16px}input{width:100%;font-size:16px;padding:10px;margin:6px 0 14px;box-sizing:border-box}a.btn,button{display:block;text-align:center;background:#1a73e8;color:#fff;padding:14px;border-radius:10px;text-decoration:none;font-size:17px;border:0;width:100%}small{color:#666}</style></head>
+<body><h2>Connect OwnTracks to Venom</h2>
+<p><small>Everything here stays on your phone. Nothing you paste is sent anywhere except into the OwnTracks app.</small></p>
+<label>Webhook URL<input id="u" placeholder="https://..."></label>
+<label>Authorization header value<input id="h" placeholder="Bearer ..."></label>
+<button onclick="go()">Make my OwnTracks link</button>
+<p id="out"></p>
+<script>
+function go(){
+ var u=document.getElementById('u').value.trim(), h=document.getElementById('h').value.trim();
+ if(!u||!h){alert('Paste both values first');return}
+ if(/^authorization\s*:/i.test(h)) h=h.replace(/^authorization\s*:\s*/i,'');
+ var cfg={"_type":"configuration","mode":3,"url":u,"httpHeaders":"Authorization: "+h,"auth":false,"monitoring":1,"tid":"BO","adapt":10,"locatorInterval":60,"locatorDisplacement":50,"ranging":false,"cmd":false};
+ var link='owntracks:///config?inline='+encodeURIComponent(btoa(JSON.stringify(cfg)));
+ document.getElementById('out').innerHTML='<a class="btn" href="'+link+'">Open in OwnTracks</a><p><small>OwnTracks will show the new settings. Tap to accept them.</small></p>';
+}
+</script></body></html>
